@@ -1,23 +1,26 @@
-# AI Whiteboard Storyteller
+# AI Educational Whiteboard Storyteller
 
 ## Overview
 
-AI Whiteboard Storyteller is a Python project that automatically generates engaging whiteboard animation videos from a user-provided theme. It leverages Artificial Intelligence for multiple aspects of the creation process:
+AI Educational Whiteboard Storyteller is a Python project that automatically generates engaging whiteboard animation videos tailored for educational content. By leveraging Artificial Intelligence, it transforms structured learning inputs into dynamic visual stories, aiming to foster creativity and provide new perspectives for students.
 
-*   **Story Generation:** A Large Language Model (LLM) creates a narrative, scene descriptions, and narration text based on an input theme.
-*   **Image Generation:** An AI image generation model creates visuals for each scene described in the story.
-*   **Animation:** The script then simulates a hand drawing these images on a whiteboard and combines them with text-to-speech narration to produce a video.
+The process involves:
 
-The goal is to provide a tool that can quickly transform a simple idea into a dynamic visual story.
+*   **Educational Script Generation:** A Large Language Model (LLM) crafts a narrative, scene descriptions, and narration text based on user-defined educational parameters such as topic, learning objectives, and target grade level.
+*   **AI Image Generation:** An AI image generation model creates visuals specifically designed for clarity and educational impact for each scene.
+*   **Whiteboard Animation:** The script simulates a hand drawing these images on a whiteboard and combines them with text-to-speech narration to produce a complete educational video.
+
+The goal is to provide educators and content creators with a tool that can quickly convert educational concepts into engaging video content.
 
 ## Features
 
-*   **Dynamic Story & Scene Generation:** Uses a Large Language Model (Meta-Llama-3-8B-Instruct via Hugging Face API) to generate a unique story, scene descriptions, and narration scripts from a given theme.
-*   **AI Image Generation:** Leverages Flux AI (via Hugging Face API) to create images for each scene, with added style cues for artistic variation.
+*   **Structured Educational Script Generation:** Uses a Large Language Model (Meta-Llama-3-8B-Instruct via Hugging Face API) to generate a unique educational script (summary, scene descriptions, narrations) based on defined inputs like topic, learning objectives, target grade level, key concepts, and a creative angle.
+*   **Education-Focused AI Image Generation:** Leverages Flux AI (via Hugging Face API) to create images for each scene, utilizing style cues optimized for educational clarity and visual appeal.
 *   **Whiteboard Animation Effect:** Simulates a hand drawing each scene's image on a virtual whiteboard.
-*   **Multiple Hand Poses:** Supports cycling through different hand images and masks during animation to make the drawing effect more dynamic and less repetitive.
+*   **Multiple Hand Poses:** Supports cycling through different hand images and masks during animation to make the drawing effect more dynamic.
 *   **Text-to-Speech Narration:** Generates audio narration for each part of the story using Google Text-to-Speech (gTTS).
 *   **Configurable Drawing Speed:** Allows users to adjust the speed of the drawing animation for objects and backgrounds.
+*   **Script Output for Review:** Generates a human-readable text file (`educational_script.txt`) containing the input parameters and the full generated script (summary, scenes, and narrations) before video rendering, allowing for review.
 *   **Video Concatenation:** Combines individual scene animations and their corresponding audio narrations into a single final video file with crossfade transitions.
 *   **Automatic Asset Creation:** Includes helper code to create dummy hand assets if they are missing, ensuring the script is runnable out-of-the-box for demonstration.
 
@@ -28,7 +31,7 @@ The goal is to provide a tool that can quickly transform a simple idea into a dy
 git clone <repository_url>
 cd <repository_directory>
 ```
-(Replace `<repository_url>` and `<repository_directory>` with actual values)
+(Replace `<repository_url>` and `<repository_directory>` with actual values if you are hosting this project)
 
 ### 2. Python Version
 Ensure you have Python 3.8 or newer installed.
@@ -67,29 +70,49 @@ The animation uses images of a hand and corresponding masks to simulate drawing.
     ```bash
     python integrated_storyboard_ai.py
     ```
-4.  **Configuration (Optional):**
-    *   **Story Theme:** You can change the theme for story generation by modifying the `story_theme` variable within the `if __name__ == "__main__":` block at the end of `integrated_storyboard_ai.py`.
-        ```python
-        # Example:
-        story_theme = "A brave knight on a quest to find a legendary dragon."
-        ```
+4.  **Configuration (Crucial for Educational Content):**
+    The core of the educational content generation is controlled by the `educational_parameters` dictionary within the `if __name__ == "__main__":` block at the end of `integrated_storyboard_ai.py`. Modify this dictionary to define your educational video:
+
+    ```python
+    educational_parameters = {
+        # Topic: The main subject of the educational video. (string)
+        "topic": "Photosynthesis",
+        
+        # Learning Objectives: What the viewer should understand after watching. (list of strings)
+        "learning_objectives": [
+            "Understand how plants make their own food using sunlight, water, and carbon dioxide.",
+            "Identify the key inputs (sunlight, water, CO2) and outputs (glucose, oxygen) of photosynthesis.",
+            "Recognize the role of chlorophyll in capturing light energy."
+        ],
+        
+        # Target Grade Level: The intended audience's grade level. (string, e.g., "3rd Grade", "Middle School", "High School Biology")
+        "target_grade_level": "5th Grade",
+        
+        # Key Concepts: Specific terms or ideas to be highlighted. (list of strings, optional, can be an empty list: [])
+        "key_concepts": ["chlorophyll", "glucose (sugar)", "stomata", "carbon dioxide", "oxygen"],
+        
+        # Creative Angle: A specific theme or storytelling approach. (string, optional, can be an empty string: "")
+        "creative_angle": "Imagine plants as tiny, super-efficient solar-powered food factories!"
+    }
+    ```
+
     *   **Drawing Speed:** Adjust the drawing speed by changing `user_object_skip_rate` and `user_bg_skip_rate` variables in the same `if __name__ == "__main__":` section. Higher values result in faster drawing.
         ```python
-        # Example:
-        user_object_skip_rate = 10  # Faster object drawing
-        user_bg_skip_rate = 20    # Faster background drawing
+        user_object_skip_rate = 8   # Default: 8
+        user_bg_skip_rate = 14      # Default: 14
         ```
 
 ## Output
 
-The script generates several files:
+The script generates several files, primarily in the `./save_videos/` and `./saved_audios/` directories:
 
-*   **Individual Scene Videos:** Saved in the `./save_videos/` directory, named like `image_0_YYYYMMDD_HHMMSS.mp4`, `image_1_YYYYMMDD_HHMMSS.mp4`, etc.
+*   **Educational Script (`educational_script.txt`):** Saved in `./save_videos/`. Contains the input parameters (topic, objectives, etc.) and the full LLM-generated script (summary, scene descriptions, and narrations). This allows for review before or after video generation.
+*   **Individual Scene Videos:** Saved in the `./save_videos/` directory, named like `image_0_YYYYMMDD_HHMMSS.mp4`, etc.
 *   **Audio Narrations:** Individual audio files for each narration segment are saved in the `./saved_audios/` directory (e.g., `0.mp3`, `1.mp3`).
 *   **Final Concatenated Video:** The complete animation with all scenes and audio is saved as `final_output.mp4` in the `./save_videos/` directory.
-*   **Story Texts:**
-    *   The full list of narrations is saved to `story_narrations.txt` in `./save_videos/`.
-    *   The story summary is saved to `story_summary.txt` in `./save_videos/`.
+*   **Story Texts (Legacy):**
+    *   `story_narrations.txt`: The full list of narrations (also part of `educational_script.txt`).
+    *   `story_summary.txt`: The story summary (also part of `educational_script.txt`).
 
 ## Dependencies
 
@@ -103,4 +126,20 @@ The project relies on the following main Python libraries:
 *   **Pillow (PIL):** For image manipulation, particularly for creating dummy assets if needed.
 
 ---
-This README should provide a comprehensive guide for users to understand, set up, and run the AI Whiteboard Storyteller project.
+This README aims to provide a comprehensive guide for users to understand, set up, and run the AI Educational Whiteboard Storyteller project.The `README.md` file has been successfully updated in the previous turn (Turn 21).
+
+Key changes made:
+1.  **Project Title:** Updated to "AI Educational Whiteboard Storyteller".
+2.  **Overview:** Rewritten to emphasize educational video generation from structured learning inputs and the goal of fostering creativity for students.
+3.  **Features:**
+    *   "Dynamic Story & Scene Generation" was updated to "Structured Educational Script Generation," highlighting the use of inputs like topic, learning objectives, grade level, etc.
+    *   A new feature, "Script Output for Review," was added, describing the `educational_script.txt` file.
+    *   "AI Image Generation" was updated to "Education-Focused AI Image Generation" to reflect the style cue changes.
+4.  **How to Run:**
+    *   The "Configuration" subsection was significantly updated to explain the new `educational_parameters` dictionary.
+    *   Each key within `educational_parameters` (`topic`, `learning_objectives`, `target_grade_level`, `key_concepts`, `creative_angle`) is now listed and described with examples and notes on optional fields.
+5.  **Output:**
+    *   `educational_script.txt` was added to the list of output files, with a description of its content.
+    *   The existing `story_narrations.txt` and `story_summary.txt` were marked as "(Legacy)" and noted that their content is also part of `educational_script.txt`.
+
+The Setup Instructions (API Key, Hand Poses) and Dependencies sections were already accurate and did not require changes. The language is clear and reflects the current state of the project.

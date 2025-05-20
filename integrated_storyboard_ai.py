@@ -37,13 +37,24 @@ def generate_audio_files(story):
 IMAGE_API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
 LLM_MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct" # Or any other suitable model
 
-# Style Cues for Image Generation
+# Style Cues for Image Generation - Updated for Educational Clarity
 STYLE_CUES = [
-    "cinematic lighting", "digital painting", "concept art", "cartoon style", 
-    "photorealistic", "impressionistic", "watercolor style", "line art with color wash",
-    "sci-fi art", "fantasy art", "steampunk style", "vintage photography", "minimalist"
+    "clear line art", 
+    "simple cartoon style", 
+    "educational illustration", 
+    "diagrammatic style", 
+    "flat design illustration",
+    "info-graphic style",
+    "technical drawing",
+    "whiteboard drawing style", # Meta-style, very fitting
+    "clean vector art",
+    "colorful cartoon style", # Explicitly colorful and simple
+    "detailed concept art (if complexity is needed for the visual)", # Use judiciously
+    "minimalist line art",
+    "photorealistic (e.g. 'a photorealistic apple', for specific, clear objects)", # Use judiciously
+    "watercolor style (light and clear washes)" # Emphasize clarity
 ]
-QUALITY_ENHANCER = "detailed, high quality, sharp focus"
+QUALITY_ENHANCER = "clear, detailed, high quality, sharp focus, easy to understand" # Enhanced for educational context
 NEGATIVE_PROMPT = "blurry, deformed, watermark, text, low quality, artifacts, noise, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, signature, NFixer, NsfwExplicit"
 
 # Class for holding animation variables
@@ -106,51 +117,87 @@ def query_text_generation_ai(payload, model_id):
         print(f"An unexpected error occurred during text generation query ({model_id}): {e}")
         return None
 
-# Function to generate story from theme using LLM
-def generate_story_from_theme(theme: str) -> tuple[list[str], list[str], str]:
-    prompt = f"""
-You are a creative storyteller. Generate a short story based on the theme: '{theme}'.
-Provide the output in JSON format with the following keys:
-- "summary": A brief summary of the story (50-100 words).
-- "scenes": A list of 5 to 10 short scene descriptions (max 20-25 words each). These scenes should visually represent the story's progression.
-- "narrations": A list of narration texts, corresponding to each scene (max 30-40 words each).
+# Function to generate educational story from input using LLM
+def generate_story_from_educational_theme(educational_input: dict) -> tuple[list[str], list[str], str]:
+    topic = educational_input.get("topic", "a general scientific concept")
+    learning_objectives = educational_input.get("learning_objectives", [])
+    target_grade_level = educational_input.get("target_grade_level", "middle school")
+    key_concepts = educational_input.get("key_concepts", []) # Optional
+    creative_angle = educational_input.get("creative_angle", "") # Optional
 
-Example Theme: "A cat discovers a magical hat."
-Example JSON Output:
+    # Format list items for the prompt
+    learning_objectives_formatted = "\n".join([f"- {obj}" for obj in learning_objectives]) if learning_objectives else "Not specified."
+    key_concepts_formatted = "\n".join([f"- {concept}" for concept in key_concepts]) if key_concepts else "Not specified."
+    creative_angle_str = f'Creative angle to use: "{creative_angle}"' if creative_angle else "No specific creative angle provided; use a clear and engaging general approach."
+
+    prompt = f"""
+You are an expert curriculum designer and creative storyteller, specializing in making educational content for {target_grade_level} students.
+Your task is to create a short, engaging whiteboard animation story explaining the topic: "{topic}".
+
+The learning objectives are:
+{learning_objectives_formatted}
+
+Key concepts to include (if any):
+{key_concepts_formatted}
+
+{creative_angle_str}
+
+Please generate the content in JSON format with the following keys:
+- "summary": A brief overview of the educational story (50-100 words). This summary should be engaging and suitable for the target audience.
+- "scenes": A list of 5 to 10 short scene descriptions (max 20-25 words each). Each scene should:
+    - Be factually accurate and relevant to the topic and learning objectives.
+    - Be visually clear and simple enough for effective whiteboard animation.
+    - Be age-appropriate for the {target_grade_level}.
+    - Incorporate the creative angle if provided.
+    - Clearly depict the key concepts if provided.
+- "narrations": A list of narration texts for each scene (max 40-50 words each). The narration should:
+    - Explain the concepts clearly and concisely.
+    - Be engaging and use language suitable for the {target_grade_level}.
+    - Potentially include questions or prompts to encourage thinking (e.g., "What do you think happens next?", "Can you see how this is like a tiny factory?").
+
+Ensure the number of scenes and narrations match precisely.
+
+Example for Photosynthesis (5th Grade, creative angle: "secret recipe"):
 {{
-  "summary": "Whiskers, a curious cat, finds a magical hat that grants him the ability to talk to other animals. He uses his new gift to help his friends and learns the true meaning of communication.",
+  "summary": "Discover the amazing secret recipe plants use to make their own food! We'll explore how they use sunlight, water, and air to create tasty sugars, just like tiny chefs.",
   "scenes": [
-    "A tabby cat curiously batting at a sparkling top hat in an attic.",
-    "The cat wearing the hat, looking surprised as a mouse talks to it.",
-    "The cat mediating a dispute between two squirrels.",
-    "The cat and a dog sharing a friendly conversation under a tree.",
-    "The cat looking content, surrounded by various animal friends."
+    "A happy sun shining down on a green plant with roots in soil.",
+    "Raindrops falling and seeping into the soil towards the plant's roots.",
+    "Animated CO2 molecules from the air floating towards the plant's leaves.",
+    "Inside a leaf: chlorophyll (green blobs) capturing sunlight.",
+    "A diagram showing water, CO2, and sunlight combining to make sugar (glucose) and oxygen.",
+    "The plant looking healthy and strong, releasing oxygen bubbles."
   ],
   "narrations": [
-    "In a dusty attic, Whiskers stumbled upon a hat shimmering with faint magic.",
-    "The moment the hat touched his head, the chattering of a tiny mouse became clear words!",
-    "He soon found himself a surprising diplomat, solving quarrels in the animal kingdom.",
-    "Friendships blossomed in the most unexpected places, all thanks to the chatty hat.",
-    "Whiskers learned that understanding one another was the greatest magic of all."
+    "Meet our plant! What's its first secret ingredient for its special recipe? Sunshine!",
+    "Next up, just like us, plants need water! Their roots slurp it up from the soil. Yum!",
+    "And for the final ingredient from the air, plants breathe in something called Carbon Dioxide, or CO2.",
+    "Inside the leaves, tiny green parts called chlorophyll are like solar panels, zapping up the sun's energy!",
+    "Using sun energy, water, and CO2, the plant cooks up sugar to eat and releases oxygen we breathe! What a recipe!",
+    "And that's how plants make their own food to grow big and strong! Isn't that amazing?"
   ]
 }}
 """
     payload = {
         "inputs": prompt,
-        "parameters": {"temperature": 0.7, "max_new_tokens": 1024, "return_full_text": False} # Added return_full_text
+        "parameters": {"temperature": 0.7, "max_new_tokens": 1500, "return_full_text": False} # Increased max_new_tokens for potentially longer educational content
     }
     
     try:
         response_data = query_text_generation_ai(payload, LLM_MODEL_ID)
         if response_data and isinstance(response_data, list) and response_data[0] and "generated_text" in response_data[0]:
-            # The actual JSON string is within 'generated_text'
             json_string = response_data[0]["generated_text"]
-            # It seems Llama models sometimes add the prompt to the generated_text, try to remove it.
-            # A simple way is to find the first '{' if the prompt is also included.
             json_start_index = json_string.find('{')
             if json_start_index != -1:
                 json_string = json_string[json_start_index:]
-
+            
+            # Attempt to fix unterminated strings or other minor JSON issues before parsing
+            # This is a simple heuristic, more robust fixing might be needed for complex issues.
+            json_string = json_string.replace('\\n', '\n').replace('\\"', '"') # Unescape newlines and quotes
+            # Ensure all strings are properly terminated before a comma or closing bracket/brace
+            import re
+            json_string = re.sub(r'(?<!\\)"\s*([,}])', r'"\1', json_string) # Add missing quote before , } ] if it looks like a string end
+            
             story_data = json.loads(json_string)
             
             summary = story_data.get("summary", "")
@@ -162,13 +209,11 @@ Example JSON Output:
                 return [], [], ""
             if len(scenes) != len(narrations):
                 print("Warning: Mismatch between number of scenes and narrations from LLM.")
-                # Attempt to use the minimum length
                 min_len = min(len(scenes), len(narrations))
                 scenes = scenes[:min_len]
                 narrations = narrations[:min_len]
-                if not scenes: # if min_len was 0
+                if not scenes:
                      return [], [], ""
-
             return scenes, narrations, summary
         else:
             print("Error: Unexpected response format from LLM or no generated text.")
@@ -177,11 +222,11 @@ Example JSON Output:
             return [], [], ""
     except json.JSONDecodeError as e:
         print(f"Error parsing JSON response from LLM: {e}")
-        if response_data and isinstance(response_data, list) and response_data[0] and "generated_text" in response_data[0]:
-             print(f"LLM raw text that failed parsing: {response_data[0]['generated_text']}")
+        if 'json_string' in locals():
+             print(f"LLM raw text that failed parsing: {json_string}")
         return [], [], ""
     except Exception as e:
-        print(f"An unexpected error occurred in generate_story_from_theme: {e}")
+        print(f"An unexpected error occurred in generate_story_from_educational_theme: {e}")
         return [], [], ""
 
 # Function to generate images from scenes
@@ -315,17 +360,61 @@ def process_images(images, json_data, story_narrations, story_summary, variables
     return final_story_path, final_summary_path, audio_paths, video_paths
 
 # Function to handle the full whiteboard animation generation process
-def generate_whiteboard_animations(theme: str, object_skip_rate: int, bg_object_skip_rate: int):
-    print(f"Starting whiteboard animation generation for theme: '{theme}'")
+def generate_whiteboard_animations(educational_theme_input: dict, object_skip_rate: int, bg_object_skip_rate: int):
+    print(f"Starting whiteboard animation generation for educational input: {educational_theme_input.get('topic', 'N/A')}")
     print(f"Using Object Skip Rate: {object_skip_rate}, Background Skip Rate: {bg_object_skip_rate}")
 
-    scenes_list, narrations_list, story_summary = generate_story_from_theme(theme)
+    scenes_list, narrations_list, story_summary = generate_story_from_educational_theme(educational_theme_input)
 
     if not scenes_list or not narrations_list:
-        print("Story generation failed or returned empty. Aborting animation process.")
+        print("Educational story generation failed or returned empty. Aborting animation process.")
         return [], [], "", ""
 
-    print(f"Story Summary: {story_summary}")
+    # Save the generated script to educational_script.txt
+    script_content = "Educational Script\n"
+    script_content += "====================\n\n"
+    script_content += f"Topic: {educational_theme_input.get('topic', 'N/A')}\n"
+    script_content += f"Target Grade Level: {educational_theme_input.get('target_grade_level', 'N/A')}\n\n"
+    
+    script_content += "Learning Objectives:\n"
+    learning_objectives = educational_theme_input.get('learning_objectives', [])
+    if learning_objectives:
+        for obj in learning_objectives:
+            script_content += f"- {obj}\n"
+    else:
+        script_content += "- N/A\n"
+    script_content += "\n"
+
+    script_content += "Key Concepts:\n"
+    key_concepts = educational_theme_input.get('key_concepts', [])
+    if key_concepts:
+        for concept in key_concepts:
+            script_content += f"- {concept}\n"
+    else:
+        script_content += "- N/A\n"
+    script_content += "\n"
+    
+    script_content += f"Creative Angle: {educational_theme_input.get('creative_angle', 'N/A')}\n"
+    script_content += "---\n"
+    script_content += "Story Summary:\n"
+    script_content += f"{story_summary}\n"
+    script_content += "---\n"
+    script_content += "Scenes & Narrations:\n\n"
+
+    for i, (scene_desc, narration_text) in enumerate(zip(scenes_list, narrations_list)):
+        script_content += f"Scene {i+1}:\n"
+        script_content += f"  Description: {scene_desc}\n"
+        script_content += f"  Narration: {narration_text}\n\n"
+
+    script_file_path = os.path.join(save_video_folder, "educational_script.txt")
+    try:
+        with open(script_file_path, "w", encoding="utf-8") as f:
+            f.write(script_content)
+        print(f"Educational script saved to: {script_file_path}")
+    except Exception as e:
+        print(f"Error saving educational script: {e}")
+
+    print(f"\nStory Summary: {story_summary}") # Keep original print for console
     print(f"Generated {len(scenes_list)} scenes.")
     print(f"Generated {len(narrations_list)} narrations.")
 
@@ -400,15 +489,54 @@ def concatenate_videos_and_audios(video_paths, audio_paths):
         return None
 
 if __name__ == "__main__":
-    # Define the theme for the story
-    story_theme = "A curious robot discovers a hidden garden in a post-apocalyptic city"
-    # story_theme = "A lost star finds its way back to its constellation with the help of a wise old owl."
-    # story_theme = "A child who can talk to plants and helps a wilting forest recover."
+    # --- User Configuration for Educational Content ---
+    # Modify the dictionary below to define the educational content for the video.
+    educational_parameters = {
+        # Topic: The main subject of the educational video.
+        "topic": "Photosynthesis",
+        
+        # Learning Objectives: What the viewer should understand after watching.
+        # Provide as a list of strings.
+        "learning_objectives": [
+            "Understand how plants make their own food using sunlight, water, and carbon dioxide.",
+            "Identify the key inputs (sunlight, water, CO2) and outputs (glucose, oxygen) of photosynthesis.",
+            "Recognize the role of chlorophyll in capturing light energy.",
+            "Appreciate the importance of photosynthesis for life on Earth." 
+        ],
+        
+        # Target Grade Level: The intended audience's grade level (e.g., "3rd Grade", "Middle School", "High School Biology").
+        "target_grade_level": "5th Grade",
+        
+        # Key Concepts: Specific terms or ideas to be highlighted. 
+        # Can be an empty list if not needed: []
+        "key_concepts": ["chlorophyll", "glucose (sugar)", "stomata", "carbon dioxide", "oxygen", "sunlight"],
+        
+        # Creative Angle: A specific theme or storytelling approach to make the content more engaging.
+        # Can be an empty string if not needed: ""
+        "creative_angle": "Imagine plants as tiny, super-efficient solar-powered food factories!"
+    }
 
-    # User-configurable drawing speeds
-    user_object_skip_rate = 8   # Default: 8. Higher values draw faster.
-    user_bg_skip_rate = 14      # Default: 14. Higher values draw faster.
+    # Example 2: The Water Cycle (Uncomment and modify 'educational_parameters' above to use)
+    # educational_parameters_water_cycle = {
+    #     "topic": "The Water Cycle",
+    #     "learning_objectives": [
+    #         "Describe the main stages: evaporation, condensation, precipitation, and collection.",
+    #         "Understand the role of the sun's energy in driving the cycle.",
+    #         "Explain how water changes states (liquid, gas, solid) throughout the cycle."
+    #     ],
+    #     "target_grade_level": "3rd Grade",
+    #     "key_concepts": ["evaporation", "condensation", "precipitation", "collection", "water vapor", "clouds", "ice"],
+    #     "creative_angle": "Follow 'Drippy' the water drop on an amazing adventure through the sky and back to Earth!"
+    # }
+    # educational_parameters = educational_parameters_water_cycle # Assign to use this example
+    
+    # --- User Configuration for Animation Speed ---
+    # Adjust these values to change the drawing speed. Higher values mean faster drawing.
+    user_object_skip_rate = 8   # Default: 8. Speed for drawing main objects/foreground elements.
+    user_bg_skip_rate = 14      # Default: 14. Speed for drawing background elements.
 
+    # --- Asset and File Setup ---
+    # (This section handles creation of dummy assets if they are missing, ensuring the script can run)
     # Base asset directory
     assets_dir = "./assets/"
     hand_poses_dir = os.path.join(assets_dir, "hand_poses/")
@@ -457,10 +585,9 @@ if __name__ == "__main__":
             else:
                 print(f"Warning: Source file {source_file} for dummy pose does not exist. Cannot create {dest_path}.")
     
-    # Generate the whiteboard animation based on the theme
-    # Hand paths are no longer passed here; process_images will discover them
+    # Generate the whiteboard animation based on the educational input
     video_paths, audio_paths, story_file_path, summary_file_path = generate_whiteboard_animations(
-        story_theme, user_object_skip_rate, user_bg_skip_rate
+        educational_parameters, user_object_skip_rate, user_bg_skip_rate
     )
 
     if video_paths and audio_paths:
