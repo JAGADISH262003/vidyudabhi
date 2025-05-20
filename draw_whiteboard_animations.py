@@ -37,34 +37,6 @@ def preprocess_image(img_path, variables):
     return variables
 
 
-def preprocess_hand_image(hand_path, hand_mask_path, variables):
-    hand = cv2.imread(hand_path)
-    hand_mask = cv2.imread(hand_mask_path, cv2.IMREAD_GRAYSCALE)
-
-    top_left, bottom_right = get_extreme_coordinates(hand_mask)
-    hand = hand[top_left[1] : bottom_right[1], top_left[0] : bottom_right[0]]
-    hand_mask = hand_mask[top_left[1] : bottom_right[1], top_left[0] : bottom_right[0]]
-    hand_mask_inv = 255 - hand_mask
-
-    # standardizing the hand masks
-    hand_mask = hand_mask / 255
-    hand_mask_inv = hand_mask_inv / 255
-
-    # making the hand background black
-    hand_bg_ind = np.where(hand_mask == 0)
-    hand[hand_bg_ind] = [0, 0, 0]
-
-    # getting the img and hand dim
-    hand_ht, hand_wd = hand.shape[0], hand.shape[1]
-
-    variables.hand_ht = hand_ht
-    variables.hand_wd = hand_wd
-    variables.hand = hand
-    variables.hand_mask = hand_mask
-    variables.hand_mask_inv = hand_mask_inv
-    return variables
-
-
 def get_extreme_coordinates(mask):
     indices = np.where(mask == 255)
     # Extract the x and y coordinates of the pixels.
@@ -77,74 +49,121 @@ def get_extreme_coordinates(mask):
 
     return topleft, bottomright
 
+def load_hand_poses(hand_pose_paths, hand_mask_pose_paths, variables):
+    variables.hands_data = []
+    if not hand_pose_paths or not hand_mask_pose_paths or len(hand_pose_paths) != len(hand_mask_pose_paths):
+        print("Warning: Hand pose paths or mask paths are empty or mismatched. Hand animation might be skipped.")
+        return variables
+
+    for hand_path, hand_mask_path in zip(hand_pose_paths, hand_mask_pose_paths):
+        try:
+            hand_img = cv2.imread(hand_path, cv2.IMREAD_UNCHANGED) # Load with alpha if available
+            hand_mask_img = cv2.imread(hand_mask_path, cv2.IMREAD_GRAYSCALE)
+
+            if hand_img is None:
+                print(f"Warning: Could not read hand image at {hand_path}. Skipping this pose.")
+                continue
+            if hand_mask_img is None:
+                print(f"Warning: Could not read hand mask at {hand_mask_path}. Skipping this pose.")
+                continue
+            
+            # Ensure hand_img has 3 channels (BGR) for consistent processing
+            if hand_img.shape[2] == 4: # Check for alpha channel
+                # If alpha exists, one might use it or convert to BGR
+                # For now, let's assume we want BGR and ignore alpha for hand itself, mask handles transparency
+                hand_img = cv2.cvtColor(hand_img, cv2.COLOR_BGRA2BGR)
+            
+            # Preprocessing similar to original preprocess_hand_image
+            top_left, bottom_right = get_extreme_coordinates(hand_mask_img)
+            hand_img = hand_img[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
+            hand_mask_img = hand_mask_img[top_left[1]:bottom_right[1], top_left[0]:bottom_right[0]]
+            
+            hand_mask_inv_img = 255 - hand_mask_img
+
+            # Normalize masks
+            hand_mask_normalized = hand_mask_img / 255.0
+            hand_mask_inv_normalized = hand_mask_inv_img / 255.0
+
+            # Make hand background black based on its mask
+            # This step is crucial if the hand image itself isn't pre-masked
+            hand_img_bg_black = hand_img.copy() # Create a copy to modify
+            hand_img_bg_black[hand_mask_img == 0] = [0, 0, 0]
+
+
+            hand_ht, hand_wd = hand_img_bg_black.shape[0], hand_img_bg_black.shape[1]
+
+            variables.hands_data.append({
+                "image": hand_img_bg_black, # Use the one with black background
+                "mask_inv": hand_mask_inv_normalized, # For applying to drawing
+                "height": hand_ht,
+                "width": hand_wd
+            })
+        except Exception as e:
+            print(f"Error processing hand pose {hand_path} or {hand_mask_path}: {e}")
+            
+    if not variables.hands_data:
+        print("Warning: No hand poses were successfully loaded. Hand animation will be skipped.")
+    else:
+        print(f"Successfully loaded {len(variables.hands_data)} hand poses.")
+        
+    return variables
+
 
 def draw_hand_on_img(
     drawing,
-    hand,
+    current_hand_data, # Expects a dict from variables.hands_data
     drawing_coord_x,
     drawing_coord_y,
-    hand_mask_inv,
-    hand_ht,
-    hand_wd,
-    img_ht,
-    img_wd,
+    img_ht, # Overall canvas height
+    img_wd  # Overall canvas width
 ):
+    hand_image = current_hand_data["image"]
+    hand_mask_inv = current_hand_data["mask_inv"]
+    hand_ht = current_hand_data["height"]
+    hand_wd = current_hand_data["width"]
+
     remaining_ht = img_ht - drawing_coord_y
     remaining_wd = img_wd - drawing_coord_x
-    if remaining_ht > hand_ht:
-        crop_hand_ht = hand_ht
-    else:
-        crop_hand_ht = remaining_ht
+    
+    crop_hand_ht = min(hand_ht, remaining_ht)
+    crop_hand_wd = min(hand_wd, remaining_wd)
 
-    if remaining_wd > hand_wd:
-        crop_hand_wd = hand_wd
-    else:
-        crop_hand_wd = remaining_wd
+    if crop_hand_ht <= 0 or crop_hand_wd <= 0: # Avoid errors with zero or negative crop dimensions
+        return drawing
 
-    hand_cropped = hand[:crop_hand_ht, :crop_hand_wd]
+    hand_cropped = hand_image[:crop_hand_ht, :crop_hand_wd]
     hand_mask_inv_cropped = hand_mask_inv[:crop_hand_ht, :crop_hand_wd]
+    
+    # Ensure mask is 2D for broadcasting with 3-channel drawing ROI
+    if hand_mask_inv_cropped.ndim == 2:
+        hand_mask_inv_cropped_rgb = cv2.cvtColor(hand_mask_inv_cropped, cv2.COLOR_GRAY2BGR)
+    elif hand_mask_inv_cropped.ndim == 3 and hand_mask_inv_cropped.shape[2] == 1: # (h, w, 1)
+        hand_mask_inv_cropped_rgb = cv2.cvtColor(hand_mask_inv_cropped, cv2.COLOR_GRAY2BGR)
+    else: # Already (h, w, 3)
+        hand_mask_inv_cropped_rgb = hand_mask_inv_cropped
 
-    drawing[
-        drawing_coord_y : drawing_coord_y + crop_hand_ht,
-        drawing_coord_x : drawing_coord_x + crop_hand_wd,
-    ][:, :, 0] = (
-        drawing[
-            drawing_coord_y : drawing_coord_y + crop_hand_ht,
-            drawing_coord_x : drawing_coord_x + crop_hand_wd,
-        ][:, :, 0]
-        * hand_mask_inv_cropped
-    )
-    drawing[
-        drawing_coord_y : drawing_coord_y + crop_hand_ht,
-        drawing_coord_x : drawing_coord_x + crop_hand_wd,
-    ][:, :, 1] = (
-        drawing[
-            drawing_coord_y : drawing_coord_y + crop_hand_ht,
-            drawing_coord_x : drawing_coord_x + crop_hand_wd,
-        ][:, :, 1]
-        * hand_mask_inv_cropped
-    )
-    drawing[
-        drawing_coord_y : drawing_coord_y + crop_hand_ht,
-        drawing_coord_x : drawing_coord_x + crop_hand_wd,
-    ][:, :, 2] = (
-        drawing[
-            drawing_coord_y : drawing_coord_y + crop_hand_ht,
-            drawing_coord_x : drawing_coord_x + crop_hand_wd,
-        ][:, :, 2]
-        * hand_mask_inv_cropped
-    )
 
+    roi = drawing[
+        drawing_coord_y : drawing_coord_y + crop_hand_ht,
+        drawing_coord_x : drawing_coord_x + crop_hand_wd,
+    ]
+
+    # Apply inverse mask to the region of interest (ROI)
+    # Element-wise multiplication
+    masked_roi = roi * hand_mask_inv_cropped_rgb
+
+    # Add the cropped hand image to the masked ROI
+    # Ensure hand_cropped is BGR
+    if hand_cropped.shape[2] == 4: # BGRA
+        hand_cropped = cv2.cvtColor(hand_cropped, cv2.COLOR_BGRA2BGR)
+
+    combined_roi = masked_roi + hand_cropped
+    
     drawing[
         drawing_coord_y : drawing_coord_y + crop_hand_ht,
         drawing_coord_x : drawing_coord_x + crop_hand_wd,
-    ] = (
-        drawing[
-            drawing_coord_y : drawing_coord_y + crop_hand_ht,
-            drawing_coord_x : drawing_coord_x + crop_hand_wd,
-        ]
-        + hand_cropped
-    )
+    ] = combined_roi
+    
     return drawing
 
 
@@ -156,32 +175,27 @@ def draw_masked_object(
     know it is drawing object or background or an entire image
     """
     print("Skip Rate: ", skip_rate)
-    # if there is object mask, then the img_thresh will only correspond to the mask provided
     img_thresh_copy = variables.img_thresh.copy()
     if object_mask is not None:
-        # get the object and its background indices
         object_mask_black_ind = np.where(object_mask == 0)
         object_ind = np.where(object_mask == 255)
-
-        # make area other than object white
         img_thresh_copy[object_mask_black_ind] = 255
 
     selected_ind = 0
     n_cuts_vertical = int(math.ceil(variables.resize_ht / variables.split_len))
     n_cuts_horizontal = int(math.ceil(variables.resize_wd / variables.split_len))
 
-    # cut the image into grids
     grid_of_cuts = np.array(np.split(img_thresh_copy, n_cuts_horizontal, axis=-1))
     grid_of_cuts = np.array(np.split(grid_of_cuts, n_cuts_vertical, axis=-2))
-    print(grid_of_cuts.shape)
+    print(f"Grid shape: {grid_of_cuts.shape}")
 
-    # find grids where there is atleast one black pixel
-    # as only these grids will be drawn
     cut_having_black = (grid_of_cuts < black_pixel_threshold) * 1
     cut_having_black = np.sum(np.sum(cut_having_black, axis=-1), axis=-1)
     cut_black_indices = np.array(np.where(cut_having_black > 0)).T
 
-    counter = 0
+    # counter for video frames, distinct from draw_cycle_counter for hand poses
+    frame_write_counter = 0 
+    
     while len(cut_black_indices) > 1:
         selected_ind_val = cut_black_indices[selected_ind].copy()
         range_v_start = selected_ind_val[0] * variables.split_len
@@ -189,31 +203,37 @@ def draw_masked_object(
         range_h_start = selected_ind_val[1] * variables.split_len
         range_h_end = range_h_start + variables.split_len
 
-        temp_drawing = np.zeros((variables.split_len, variables.split_len, 3))
-        temp_drawing[:, :, 0] = grid_of_cuts[selected_ind_val[0]][selected_ind_val[1]]
-        temp_drawing[:, :, 1] = grid_of_cuts[selected_ind_val[0]][selected_ind_val[1]]
-        temp_drawing[:, :, 2] = grid_of_cuts[selected_ind_val[0]][selected_ind_val[1]]
+        temp_drawing_patch = grid_of_cuts[selected_ind_val[0]][selected_ind_val[1]]
+        # Ensure temp_drawing_patch is BGR for assignment
+        if temp_drawing_patch.ndim == 2: # Grayscale
+             temp_drawing_patch_bgr = cv2.cvtColor(temp_drawing_patch, cv2.COLOR_GRAY2BGR)
+        else: # Already BGR
+             temp_drawing_patch_bgr = temp_drawing_patch
 
-        variables.drawn_frame[range_v_start:range_v_end, range_h_start:range_h_end] = (
-            temp_drawing
-        )
 
-        hand_coord_x = range_h_start + int(variables.split_len / 2)
-        hand_coord_y = range_v_start + int(variables.split_len / 2)
-        drawn_frame_with_hand = draw_hand_on_img(
-            variables.drawn_frame.copy(),
-            variables.hand.copy(),
-            hand_coord_x,
-            hand_coord_y,
-            variables.hand_mask_inv.copy(),
-            variables.hand_ht,
-            variables.hand_wd,
-            variables.resize_ht,
-            variables.resize_wd,
-        )
+        variables.drawn_frame[range_v_start:range_v_end, range_h_start:range_h_end] = temp_drawing_patch_bgr
 
-        # delete the selected ind from the d_array
-        cut_black_indices[selected_ind] = cut_black_indices[-1]
+
+        drawn_frame_with_hand = variables.drawn_frame.copy() # Start with current state
+
+        if variables.hands_data: # Only draw hand if poses are loaded
+            current_hand_data = variables.hands_data[variables.draw_cycle_counter % len(variables.hands_data)]
+            
+            # Calculate hand coordinates (center of the current drawing patch)
+            hand_coord_x = range_h_start + (variables.split_len // 2) - (current_hand_data["width"] // 2)
+            hand_coord_y = range_v_start + (variables.split_len // 2) - (current_hand_data["height"] // 2)
+            
+            drawn_frame_with_hand = draw_hand_on_img(
+                drawn_frame_with_hand, # Pass the copy
+                current_hand_data,
+                hand_coord_x,
+                hand_coord_y,
+                variables.resize_ht, # Pass canvas dimensions
+                variables.resize_wd
+            )
+            variables.draw_cycle_counter += 1 # Increment to cycle through hand poses
+
+        cut_black_indices[selected_ind] = cut_black_indices[-1] # Efficient removal
         cut_black_indices = cut_black_indices[:-1]
 
         del selected_ind

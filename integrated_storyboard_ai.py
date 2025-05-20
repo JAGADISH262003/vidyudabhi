@@ -6,6 +6,9 @@ import datetime
 import tempfile
 import requests
 import io
+import random # Added for style cue selection
+import glob # For finding hand pose files
+import shutil # For copying files
 from PIL import Image
 from draw_whiteboard_animations import draw_whiteboard_animations
 from gtts import gTTS
@@ -30,9 +33,18 @@ def generate_audio_files(story):
             print(f"Error generating audio for segment {i}: {e}")
     return audio_paths
 
-# Flux AI configuration
-API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
-headers = {"Authorization": "Bearer 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"}  # Replace with your actual token
+# AI Model Configurations
+IMAGE_API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
+LLM_MODEL_ID = "meta-llama/Meta-Llama-3-8B-Instruct" # Or any other suitable model
+
+# Style Cues for Image Generation
+STYLE_CUES = [
+    "cinematic lighting", "digital painting", "concept art", "cartoon style", 
+    "photorealistic", "impressionistic", "watercolor style", "line art with color wash",
+    "sci-fi art", "fantasy art", "steampunk style", "vintage photography", "minimalist"
+]
+QUALITY_ENHANCER = "detailed, high quality, sharp focus"
+NEGATIVE_PROMPT = "blurry, deformed, watermark, text, low quality, artifacts, noise, ugly, duplicate, morbid, mutilated, out of frame, extra fingers, mutated hands, poorly drawn hands, poorly drawn face, mutation, dehydrated, bad anatomy, bad proportions, extra limbs, cloned face, disfigured, gross proportions, malformed limbs, missing arms, missing legs, extra arms, extra legs, fused fingers, too many fingers, long neck, username, signature, NFixer, NsfwExplicit"
 
 # Class for holding animation variables
 class AllVariables:
@@ -45,43 +57,226 @@ class AllVariables:
         self.bg_object_skip_rate = bg_object_skip_rate
         self.end_gray_img_duration_in_sec = end_gray_img_duration_in_sec
 
-# Function to interact with Flux AI
+# Function to interact with Flux AI (Image Generation)
 def query_flux_ai(payload):
     try:
-        response = requests.post(API_URL, headers=headers, json=payload)
+        hf_token = os.getenv("HF_API_TOKEN")
+        if not hf_token:
+            raise ValueError("Hugging Face API token not found. Set the HF_API_TOKEN environment variable.")
+        headers = {"Authorization": f"Bearer {hf_token}"}
+        
+        response = requests.post(IMAGE_API_URL, headers=headers, json=payload)
+        response.raise_for_status()
         return response.content
+    except requests.exceptions.RequestException as e:
+        print(f"Error querying Image Generation AI: {e}")
+        return None
+    except ValueError as e:
+        print(e)
+        return None
     except Exception as e:
-        print(f"Error querying Flux AI: {e}")
+        print(f"An unexpected error occurred during image generation query: {e}")
         return None
 
+# Function to query Text Generation LLM
+def query_text_generation_ai(payload, model_id):
+    API_URL = f"https://api-inference.huggingface.co/models/{model_id}"
+    try:
+        hf_token = os.getenv("HF_API_TOKEN")
+        if not hf_token:
+            raise ValueError("Hugging Face API token not found. Set the HF_API_TOKEN environment variable.")
+        
+        headers = {
+            "Authorization": f"Bearer {hf_token}",
+            "Content-Type": "application/json"
+        }
+        
+        response = requests.post(API_URL, headers=headers, json=payload)
+        response.raise_for_status()
+        return response.json()
+    except requests.exceptions.RequestException as e:
+        print(f"Error querying Text Generation AI ({model_id}): {e}")
+        if response is not None:
+            print(f"Response content: {response.text}")
+        return None
+    except ValueError as e:
+        print(e)
+        return None
+    except Exception as e:
+        print(f"An unexpected error occurred during text generation query ({model_id}): {e}")
+        return None
+
+# Function to generate story from theme using LLM
+def generate_story_from_theme(theme: str) -> tuple[list[str], list[str], str]:
+    prompt = f"""
+You are a creative storyteller. Generate a short story based on the theme: '{theme}'.
+Provide the output in JSON format with the following keys:
+- "summary": A brief summary of the story (50-100 words).
+- "scenes": A list of 5 to 10 short scene descriptions (max 20-25 words each). These scenes should visually represent the story's progression.
+- "narrations": A list of narration texts, corresponding to each scene (max 30-40 words each).
+
+Example Theme: "A cat discovers a magical hat."
+Example JSON Output:
+{{
+  "summary": "Whiskers, a curious cat, finds a magical hat that grants him the ability to talk to other animals. He uses his new gift to help his friends and learns the true meaning of communication.",
+  "scenes": [
+    "A tabby cat curiously batting at a sparkling top hat in an attic.",
+    "The cat wearing the hat, looking surprised as a mouse talks to it.",
+    "The cat mediating a dispute between two squirrels.",
+    "The cat and a dog sharing a friendly conversation under a tree.",
+    "The cat looking content, surrounded by various animal friends."
+  ],
+  "narrations": [
+    "In a dusty attic, Whiskers stumbled upon a hat shimmering with faint magic.",
+    "The moment the hat touched his head, the chattering of a tiny mouse became clear words!",
+    "He soon found himself a surprising diplomat, solving quarrels in the animal kingdom.",
+    "Friendships blossomed in the most unexpected places, all thanks to the chatty hat.",
+    "Whiskers learned that understanding one another was the greatest magic of all."
+  ]
+}}
+"""
+    payload = {
+        "inputs": prompt,
+        "parameters": {"temperature": 0.7, "max_new_tokens": 1024, "return_full_text": False} # Added return_full_text
+    }
+    
+    try:
+        response_data = query_text_generation_ai(payload, LLM_MODEL_ID)
+        if response_data and isinstance(response_data, list) and response_data[0] and "generated_text" in response_data[0]:
+            # The actual JSON string is within 'generated_text'
+            json_string = response_data[0]["generated_text"]
+            # It seems Llama models sometimes add the prompt to the generated_text, try to remove it.
+            # A simple way is to find the first '{' if the prompt is also included.
+            json_start_index = json_string.find('{')
+            if json_start_index != -1:
+                json_string = json_string[json_start_index:]
+
+            story_data = json.loads(json_string)
+            
+            summary = story_data.get("summary", "")
+            scenes = story_data.get("scenes", [])
+            narrations = story_data.get("narrations", [])
+
+            if not all([summary, scenes, narrations]):
+                print("Warning: LLM response missing some fields (summary, scenes, or narrations).")
+                return [], [], ""
+            if len(scenes) != len(narrations):
+                print("Warning: Mismatch between number of scenes and narrations from LLM.")
+                # Attempt to use the minimum length
+                min_len = min(len(scenes), len(narrations))
+                scenes = scenes[:min_len]
+                narrations = narrations[:min_len]
+                if not scenes: # if min_len was 0
+                     return [], [], ""
+
+            return scenes, narrations, summary
+        else:
+            print("Error: Unexpected response format from LLM or no generated text.")
+            if response_data:
+                 print(f"LLM raw response: {response_data}")
+            return [], [], ""
+    except json.JSONDecodeError as e:
+        print(f"Error parsing JSON response from LLM: {e}")
+        if response_data and isinstance(response_data, list) and response_data[0] and "generated_text" in response_data[0]:
+             print(f"LLM raw text that failed parsing: {response_data[0]['generated_text']}")
+        return [], [], ""
+    except Exception as e:
+        print(f"An unexpected error occurred in generate_story_from_theme: {e}")
+        return [], [], ""
+
 # Function to generate images from scenes
-def generate_images_from_scenes(scenes):
+def generate_images_from_scenes(scenes: list[str]):
     images = []
-    for i, scene in enumerate(scenes):
+    if not scenes:
+        print("No scenes provided to generate images.")
+        return images
+
+    for i, original_scene_prompt in enumerate(scenes):
         try:
-            image_bytes = query_flux_ai({"inputs": scene})
+            # Randomly select 1 or 2 style cues
+            num_styles_to_select = random.randint(1, 2)
+            selected_styles = random.sample(STYLE_CUES, num_styles_to_select)
+            style_string = ", ".join(selected_styles)
+
+            # Construct the enhanced prompt
+            enhanced_prompt = f"{original_scene_prompt}, {style_string}, {QUALITY_ENHANCER}"
+            
+            print(f"Generating image for scene {i+1} with prompt: \"{enhanced_prompt}\"")
+            
+            payload = {
+                "inputs": enhanced_prompt,
+                "negative_prompt": NEGATIVE_PROMPT 
+            }
+            
+            image_bytes = query_flux_ai(payload)
+            
             if image_bytes:
                 image = Image.open(io.BytesIO(image_bytes))
                 images.append(np.array(image))
-                print(f"Image for scene {i + 1} generated")
+                print(f"Image for scene {i + 1} generated successfully.")
             else:
-                print(f"Error generating image for scene {i + 1}")
+                print(f"Error generating image for scene {i + 1}: No image data returned.")
         except Exception as e:
-            print(f"Error processing scene {i + 1}: {e}")
+            print(f"Error processing scene {i + 1} ('{original_scene_prompt}'): {e}")
     return images
 
-# Placeholder function to generate JSON data
+# Placeholder function to generate JSON data (if needed for whiteboard animation)
+# For now, it seems draw_whiteboard_animations might not strictly need complex shape data if we're just animating full images.
+# If it does, this function might need to be more sophisticated or be removed if not used.
 def generate_json_data(images):
-    return [{"shapes": []} for _ in images]
+    # Assuming basic animation of the whole image, so no specific shapes needed.
+    # The draw_whiteboard_animations function might need adjustment if this is the case.
+    return [{"shapes": []} for _ in images] # Returns empty shapes, assuming full image animation
 
 # Function to process and save images, JSON data, and audio files
-def process_images(images, json_data, hand_path, hand_mask_path, story, summary, variables):
-    audio_paths = generate_audio_files(story)  # Generate audio files
+def process_images(images, json_data, story_narrations, story_summary, variables): # Removed hand_path, hand_mask_path
+    audio_paths = generate_audio_files(story_narrations)
+
+    hand_poses_dir = "./assets/hand_poses/"
+    default_hand_image = "./assets/drawing-hand.png"
+    default_hand_mask = "./assets/hand-mask.png"
+
+    hand_pose_paths_list = sorted(glob.glob(os.path.join(hand_poses_dir, "hand_pose_*.png")))
+    # Derive mask paths from image paths, assuming specific naming convention.
+    hand_mask_pose_paths_list = []
+    for p_path in hand_pose_paths_list:
+        # Expecting mask name like hand_pose_0_mask.png from hand_pose_0.png
+        mask_name = os.path.basename(p_path).replace(".png", "_mask.png")
+        hand_mask_pose_paths_list.append(os.path.join(hand_poses_dir, mask_name))
+
+    # Validate that each hand image has a corresponding mask file
+    valid_hand_poses = []
+    valid_hand_mask_poses = []
+    for img_path, mask_path in zip(hand_pose_paths_list, hand_mask_pose_paths_list):
+        if os.path.exists(mask_path):
+            valid_hand_poses.append(img_path)
+            valid_hand_mask_poses.append(mask_path)
+        else:
+            print(f"Warning: Mask file {mask_path} not found for hand image {img_path}. Skipping this pose.")
+            
+    hand_pose_paths_list = valid_hand_poses
+    hand_mask_pose_paths_list = valid_hand_mask_poses
+
+    if not hand_pose_paths_list:
+        print(f"Warning: No hand poses found in {hand_poses_dir}. Falling back to default hand images.")
+        if os.path.exists(default_hand_image) and os.path.exists(default_hand_mask):
+            hand_pose_paths_list = [default_hand_image]
+            hand_mask_pose_paths_list = [default_hand_mask]
+        else:
+            print(f"Error: Default hand images not found at {default_hand_image} or {default_hand_mask}. Hand animation will likely fail.")
+            hand_pose_paths_list = [] # Ensure lists are empty if defaults also missing
+            hand_mask_pose_paths_list = []
+    else:
+        print(f"Found {len(hand_pose_paths_list)} hand poses in {hand_poses_dir}.")
+
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        video_paths = []  # To store the paths of generated video files
+        video_paths = []
 
-        # Save images and JSON files to temporary directory
+        if not images:
+            print("No images to process.")
+            return "", "", [], []
+
         for i, (image, json_content) in enumerate(zip(images, json_data)):
             try:
                 img_path = os.path.join(temp_dir, f"image_{i}.png")
@@ -91,60 +286,73 @@ def process_images(images, json_data, hand_path, hand_mask_path, story, summary,
                 with open(json_path, 'w') as f:
                     json.dump(json_content, f)
 
-                # Video save path
-                current_time = str(datetime.datetime.now().date())
+                current_time = str(datetime.datetime.now().strftime("%Y%m%d_%H%M%S")) # More precise timestamp
                 img_name = os.path.splitext(os.path.basename(img_path))[0]
-                video_save_name = f"{img_name}-{current_time}.mp4"
+                video_save_name = f"{img_name}_{current_time}.mp4" # Use underscore for readability
                 save_video_path = os.path.join(save_video_folder, video_save_name)
-                video_paths.append(save_video_path)  # Store video path for later use
-                print("save_video_path: ", save_video_path)
+                video_paths.append(save_video_path)
+                print(f"Video for image {i} will be saved to: {save_video_path}")
 
-                # Call drawing function (ensure draw_whiteboard_animations exists)
+                # Call drawing function with lists of hand paths
                 draw_whiteboard_animations(
-                    img_path, json_path, hand_path, hand_mask_path, save_video_path, variables
+                    img_path, json_path, hand_pose_paths_list, hand_mask_pose_paths_list, save_video_path, variables
                 )
             except Exception as e:
-                print(f"Error processing image {i}: {e}")
+                print(f"Error processing image {i} for video generation: {e}")
+        
+        final_story_path = ""
+        final_summary_path = ""
+        if story_narrations:
+            final_story_path = os.path.join(save_video_folder, "story_narrations.txt")
+            with open(final_story_path, "w") as f:
+                f.write("\n".join(story_narrations)) # Save each narration on a new line
+        
+        if story_summary:
+            final_summary_path = os.path.join(save_video_folder, "story_summary.txt")
+            with open(final_summary_path, "w") as f:
+                f.write(story_summary)
 
-        # Save story and summary
-        story_path = os.path.join(save_video_folder, "story.txt")
-        summary_path = os.path.join(save_video_folder, "summary.txt")
-        with open(story_path, "w") as f:
-            f.write(" ".join(story))  # Join list into string
-        with open(summary_path, "w") as f:
-            f.write(summary)
-
-    return story_path, summary_path, audio_paths, video_paths
+    return final_story_path, final_summary_path, audio_paths, video_paths
 
 # Function to handle the full whiteboard animation generation process
-def generate_whiteboard_animations(scenes, story, summary):
-    hand_path = "/content/drive/MyDrive/Final_Animation/assets/drawing-hand.png"
-    hand_mask_path = "/content/drive/MyDrive/Final_Animation/assets/hand-mask.png"
+def generate_whiteboard_animations(theme: str, object_skip_rate: int, bg_object_skip_rate: int):
+    print(f"Starting whiteboard animation generation for theme: '{theme}'")
+    print(f"Using Object Skip Rate: {object_skip_rate}, Background Skip Rate: {bg_object_skip_rate}")
 
-    # Instantiate animation variables
+    scenes_list, narrations_list, story_summary = generate_story_from_theme(theme)
+
+    if not scenes_list or not narrations_list:
+        print("Story generation failed or returned empty. Aborting animation process.")
+        return [], [], "", ""
+
+    print(f"Story Summary: {story_summary}")
+    print(f"Generated {len(scenes_list)} scenes.")
+    print(f"Generated {len(narrations_list)} narrations.")
+
     variables = AllVariables(
-        frame_rate=25,
-        resize_wd=1020,
-        resize_ht=1020,
-        split_len=10,
-        object_skip_rate=8,
-        bg_object_skip_rate=14,
-        end_gray_img_duration_in_sec=3,
+        frame_rate=25, 
+        resize_wd=1020, 
+        resize_ht=1020, 
+        split_len=10, 
+        object_skip_rate=object_skip_rate, # Use parameter value
+        bg_object_skip_rate=bg_object_skip_rate, # Use parameter value
+        end_gray_img_duration_in_sec=3 
     )
 
-    # Generate images using Flux AI
-    images = generate_images_from_scenes(scenes)
-    
-    # Generate JSON data for the images
-    json_data = generate_json_data(images)
+    images = generate_images_from_scenes(scenes_list)
+    if not images:
+        print("Image generation failed or returned no images. Aborting animation process.")
+        return [], [], story_summary, "" # Return summary and empty paths
 
-    # Process images and save the story/summary
-    story_path, summary_path, audio_paths, video_paths = process_images(
-        images, json_data, hand_path, hand_mask_path, story, summary, variables
+    json_data = generate_json_data(images) # Generate basic JSON data for each image
+
+    # Pass narrations_list as story_narrations and story_summary to process_images
+    # hand_path and hand_mask_path are no longer passed here, process_images handles discovery
+    processed_story_path, processed_summary_path, audio_paths, video_paths = process_images(
+        images, json_data, narrations_list, story_summary, variables
     )
 
-    # Return paths to generated files
-    return video_paths, audio_paths, story_path, summary_path
+    return video_paths, audio_paths, processed_story_path, processed_summary_path
 
 # Function to concatenate videos and audios
 def concatenate_videos_and_audios(video_paths, audio_paths):
@@ -192,38 +400,80 @@ def concatenate_videos_and_audios(video_paths, audio_paths):
         return None
 
 if __name__ == "__main__":
-    # Example usage
-    scenes = [
-        "Scene 1: A young man with shoulder-length black hair, wearing a black jacket, eating a samosa, with a cafe background.",
-        "Scene 2: The same young man with shoulder-length black hair and a black jacket, now holding a cup of coffee and drinking, with the same cafe background as in scene 1.",
-        "Scene 3: A different person, a woman in a red dress, enters the cafe.",
-        "Scene 4: The young man with shoulder-length hair glances up and smiles at her.",
-        "Scene 5: The woman in the red dress orders a coffee and sits at a nearby table, glancing over at the young man.",
-        "Scene 6: The young man, now curious, watches her from the corner of his eye as she settles down with her coffee.",
-        "Scene 7: The woman opens a book, and the young man notices the same book he has on his table.",
-        "Scene 8: The man stands up, nervously walking over to her table, holding his book in hand.",
-        "Scene 9: They exchange a few words, realizing they both are reading the same book.",
-        "Scene 10: The woman laughs, offering the man a seat at her table."        # Add more scenes as needed
-    ]
-    
-    story = [
-        "A story about a man's coffee shop experience.",
-        "He enjoys his samosa and coffee while watching the world go by.",
-        "A woman in a red dress enters the cafe.",
-        "The man glances up and smiles at her.",
-        "The woman orders a coffee and sits near the young man, their eyes briefly meeting.",
-        "Curiosity piqued, the man discreetly watches her as she opens her book.",
-        "To his surprise, the book she’s reading is the same as his.",
-        "Gathering courage, the man approaches her table, showing her his copy of the book.",
-        "They realize they share an interest in the same story, sparking a conversation.",
-        "The woman invites the man to sit with her, and they bond over their shared love for the book."   
-     ]
-    summary = "Summary of the man's visit to the cafe."
+    # Define the theme for the story
+    story_theme = "A curious robot discovers a hidden garden in a post-apocalyptic city"
+    # story_theme = "A lost star finds its way back to its constellation with the help of a wise old owl."
+    # story_theme = "A child who can talk to plants and helps a wilting forest recover."
 
-    video_paths, audio_paths, story_path, summary_path = generate_whiteboard_animations(scenes, story, summary)
-    
-    # Concatenate videos and audios
-    final_video_path = concatenate_videos_and_audios(video_paths, audio_paths)
+    # User-configurable drawing speeds
+    user_object_skip_rate = 8   # Default: 8. Higher values draw faster.
+    user_bg_skip_rate = 14      # Default: 14. Higher values draw faster.
 
-    print("Story path:", story_path)
-    print("Summary path:", summary_path)
+    # Base asset directory
+    assets_dir = "./assets/"
+    hand_poses_dir = os.path.join(assets_dir, "hand_poses/")
+    os.makedirs(hand_poses_dir, exist_ok=True)
+
+    # Original hand image paths (used as source for dummy poses)
+    original_hand_image = os.path.join(assets_dir, "drawing-hand.png")
+    original_hand_mask = os.path.join(assets_dir, "hand-mask.png")
+
+    # Create dummy original hand images if they don't exist (for first-time run or clean env)
+    if not os.path.exists(original_hand_image):
+        try:
+            from PIL import Image as PImage # Renamed to avoid conflict with 'Image' from global imports
+            dummy_img = PImage.new('RGBA', (100, 100), (255, 0, 0, 0)) # Transparent red square
+            dummy_img.save(original_hand_image)
+            print(f"Created dummy original hand image at {original_hand_image}")
+        except Exception as e:
+            print(f"Could not create dummy original hand image: {e}")
+            
+    if not os.path.exists(original_hand_mask):
+        try:
+            from PIL import Image as PImage
+            dummy_img = PImage.new('RGBA', (100, 100), (0, 0, 0, 255)) # Opaque black square
+            dummy_img.save(original_hand_mask)
+            print(f"Created dummy original hand mask at {original_hand_mask}")
+        except Exception as e:
+            print(f"Could not create dummy original hand mask: {e}")
+
+    # Create dummy hand pose files by copying originals if they don't exist
+    dummy_poses_to_create = {
+        "hand_pose_0.png": original_hand_image,
+        "hand_pose_0_mask.png": original_hand_mask,
+        "hand_pose_1.png": original_hand_image, # Using original again for variety
+        "hand_pose_1_mask.png": original_hand_mask 
+    }
+
+    for pose_file, source_file in dummy_poses_to_create.items():
+        dest_path = os.path.join(hand_poses_dir, pose_file)
+        if not os.path.exists(dest_path):
+            if os.path.exists(source_file):
+                try:
+                    shutil.copy(source_file, dest_path)
+                    print(f"Created dummy pose file: {dest_path} from {source_file}")
+                except Exception as e:
+                    print(f"Error copying {source_file} to {dest_path}: {e}")
+            else:
+                print(f"Warning: Source file {source_file} for dummy pose does not exist. Cannot create {dest_path}.")
+    
+    # Generate the whiteboard animation based on the theme
+    # Hand paths are no longer passed here; process_images will discover them
+    video_paths, audio_paths, story_file_path, summary_file_path = generate_whiteboard_animations(
+        story_theme, user_object_skip_rate, user_bg_skip_rate
+    )
+
+    if video_paths and audio_paths:
+        # Concatenate videos and audios
+        final_video_path = concatenate_videos_and_audios(video_paths, audio_paths)
+        if final_video_path:
+            print("Final video generated successfully:", final_video_path)
+        else:
+            print("Failed to generate the final concatenated video.")
+    else:
+        print("No videos or audios were generated to concatenate.")
+
+    if story_file_path:
+        print("Story narrations saved at:", story_file_path)
+    if summary_file_path:
+        print("Story summary saved at:", summary_file_path)
