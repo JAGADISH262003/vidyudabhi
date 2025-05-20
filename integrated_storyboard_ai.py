@@ -7,7 +7,7 @@ import tempfile
 import requests
 import io
 from PIL import Image
-from draw_whiteboard_animations import draw_whiteboard_animations
+from draw_whiteboard_animations import draw_whiteboard_animations, AllVariables
 from gtts import gTTS
 from moviepy.editor import VideoFileClip, AudioFileClip, concatenate_videoclips
 
@@ -33,17 +33,6 @@ def generate_audio_files(story):
 # Flux AI configuration
 API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
 headers = {"Authorization": "Bearer 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"}  # Replace with your actual token
-
-# Class for holding animation variables
-class AllVariables:
-    def __init__(self, frame_rate, resize_wd, resize_ht, split_len, object_skip_rate, bg_object_skip_rate, end_gray_img_duration_in_sec):
-        self.frame_rate = frame_rate
-        self.resize_wd = resize_wd
-        self.resize_ht = resize_ht
-        self.split_len = split_len
-        self.object_skip_rate = object_skip_rate
-        self.bg_object_skip_rate = bg_object_skip_rate
-        self.end_gray_img_duration_in_sec = end_gray_img_duration_in_sec
 
 # Function to interact with Flux AI
 def query_flux_ai(payload):
@@ -75,7 +64,7 @@ def generate_json_data(images):
     return [{"shapes": []} for _ in images]
 
 # Function to process and save images, JSON data, and audio files
-def process_images(images, json_data, hand_path, hand_mask_path, story, summary, variables):
+def process_images(images, json_data, story, summary, variables):
     audio_paths = generate_audio_files(story)  # Generate audio files
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -100,9 +89,7 @@ def process_images(images, json_data, hand_path, hand_mask_path, story, summary,
                 print("save_video_path: ", save_video_path)
 
                 # Call drawing function (ensure draw_whiteboard_animations exists)
-                draw_whiteboard_animations(
-                    img_path, json_path, hand_path, hand_mask_path, save_video_path, variables
-                )
+                draw_whiteboard_animations(img_path, json_path, save_video_path, variables)
             except Exception as e:
                 print(f"Error processing image {i}: {e}")
 
@@ -118,9 +105,6 @@ def process_images(images, json_data, hand_path, hand_mask_path, story, summary,
 
 # Function to handle the full whiteboard animation generation process
 def generate_whiteboard_animations(scenes, story, summary):
-    hand_path = "/content/drive/MyDrive/Final_Animation/assets/drawing-hand.png"
-    hand_mask_path = "/content/drive/MyDrive/Final_Animation/assets/hand-mask.png"
-
     # Instantiate animation variables
     variables = AllVariables(
         frame_rate=25,
@@ -130,6 +114,8 @@ def generate_whiteboard_animations(scenes, story, summary):
         object_skip_rate=8,
         bg_object_skip_rate=14,
         end_gray_img_duration_in_sec=3,
+        hand_path="assets/drawing-hand.png",
+        hand_mask_path="assets/hand-mask.png",
     )
 
     # Generate images using Flux AI
@@ -140,7 +126,7 @@ def generate_whiteboard_animations(scenes, story, summary):
 
     # Process images and save the story/summary
     story_path, summary_path, audio_paths, video_paths = process_images(
-        images, json_data, hand_path, hand_mask_path, story, summary, variables
+        images, json_data, story, summary, variables
     )
 
     # Return paths to generated files

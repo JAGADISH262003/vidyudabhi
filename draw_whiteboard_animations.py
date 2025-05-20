@@ -235,9 +235,7 @@ def draw_masked_object(
         variables.drawn_frame[:, :, :] = variables.img
 
 
-def draw_whiteboard_animations(
-    img_path, mask_path, hand_path, hand_mask_path, save_video_path, variables
-):
+def draw_whiteboard_animations(img_path, mask_path, save_video_path, variables):
     if mask_path is not None:
         object_mask_exists = True
     else:
@@ -249,7 +247,9 @@ def draw_whiteboard_animations(
 
     # reading hand image and preprocess
     variables = preprocess_hand_image(
-        hand_path=hand_path, hand_mask_path=hand_mask_path, variables=variables
+        hand_path=variables.hand_path,
+        hand_mask_path=variables.hand_mask_path,
+        variables=variables,
     )
 
     # calculate how much time it takes to make video for 1 image
@@ -351,6 +351,8 @@ class AllVariables:
         object_skip_rate=None,
         bg_object_skip_rate=None,
         end_gray_img_duration_in_sec=None,
+        hand_path: str = None,
+        hand_mask_path: str = None,
     ):
         self.frame_rate = frame_rate
         self.resize_wd = resize_wd
@@ -359,16 +361,16 @@ class AllVariables:
         self.object_skip_rate = object_skip_rate
         self.bg_object_skip_rate = bg_object_skip_rate
         self.end_gray_img_duration_in_sec = end_gray_img_duration_in_sec
+        self.hand_path = hand_path
+        self.hand_mask_path = hand_mask_path
 
 
 if __name__ == "__main__":
     img_path = "./images/2.png"
     save_path = "./save_videos"
-    mask_path = None 
+    mask_path = None
     mask_path = "./images/2.json"  # some json path
     # if no masks are available, put mask_path = None
-    hand_path = "./images/drawing-hand.png"
-    hand_mask_path = "./images/hand-mask.png"
 
     # video save path
     current_time = str(datetime.datetime.now().date())
@@ -391,9 +393,9 @@ if __name__ == "__main__":
         # hence increasing the skip rate
         end_gray_img_duration_in_sec=3,  # the last few secs of the video
         # for every image will have the entire original image shown as is
+        hand_path="assets/drawing-hand.png",
+        hand_mask_path="assets/hand-mask.png",
     )
 
     # invoking the drawing function
-    draw_whiteboard_animations(
-        img_path, mask_path, hand_path, hand_mask_path, save_video_path, variables
-    )
+    draw_whiteboard_animations(img_path, mask_path, save_video_path, variables)
