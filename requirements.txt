@@ -1,0 +1,6 @@
+opencv-python
+numpy
+gTTS
+moviepy
+Pillow
+requests

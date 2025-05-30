@@ -32,16 +32,21 @@ def generate_audio_files(story):
 
 # Flux AI configuration
 API_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
-headers = {"Authorization": "Bearer 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"}  # Replace with your actual token
+api_key = os.getenv("HF_API_KEY")
+if not api_key:
+    raise ValueError("Hugging Face API key not found. Please set the HF_API_KEY environment variable.")
+headers = {"Authorization": f"Bearer {api_key}"}  # Replace with your actual token
 
 # Function to interact with Flux AI
 def query_flux_ai(payload):
     try:
         response = requests.post(API_URL, headers=headers, json=payload)
+        response.raise_for_status()  # This will raise an HTTPError for bad responses (4xx or 5xx)
         return response.content
-    except Exception as e:
-        print(f"Error querying Flux AI: {e}")
-        return None
+    except requests.exceptions.RequestException as e:
+        print(f"Error querying Flux AI: {e}") # Keep logging for info
+        # Re-raising the original error after logging.
+        raise 
 
 # Function to generate images from scenes
 def generate_images_from_scenes(scenes):
@@ -61,45 +66,85 @@ def generate_images_from_scenes(scenes):
 
 # Placeholder function to generate JSON data
 def generate_json_data(images):
+    # TODO: This is a placeholder function. 
+    # Its intended purpose is to generate actual mask data (e.g., polygons for objects) 
+    # that could be used by draw_whiteboard_animations if complex, per-image masks are desired.
+    # Currently, it returns a list of empty "shapes" compatible with the expected JSON structure
+    # by draw_whiteboard_animations when a mask file is provided but contains no actual shapes.
     return [{"shapes": []} for _ in images]
+
+
+def _process_and_animate_single_image(
+    image_index, 
+    image_array, 
+    json_data_for_image, 
+    temp_dir_path, 
+    base_video_save_folder, 
+    animation_variables
+):
+    try:
+        img_path = os.path.join(temp_dir_path, f"image_{image_index}.png")
+        json_path = os.path.join(temp_dir_path, f"image_{image_index}.json")
+
+        cv2.imwrite(img_path, cv2.cvtColor(image_array, cv2.COLOR_RGB2BGR))
+        with open(json_path, 'w') as f:
+            json.dump(json_data_for_image, f)
+
+        current_time = str(datetime.datetime.now().date())
+        img_name_base = os.path.splitext(os.path.basename(img_path))[0]
+        video_save_name = f"{img_name_base}-{current_time}.mp4"
+        save_video_path = os.path.join(base_video_save_folder, video_save_name)
+        
+        print("save_video_path: ", save_video_path)
+
+        draw_whiteboard_animations(img_path, json_path, save_video_path, animation_variables)
+        return save_video_path
+    except Exception as e:
+        print(f"Error processing image {image_index}: {e}")
+        return None
+
+
+def _save_text_outputs(story_segments_list, summary_text, output_folder):
+    story_path = os.path.join(output_folder, "story.txt")
+    summary_path = os.path.join(output_folder, "summary.txt")
+    try:
+        story_content = " ".join(story_segments_list)
+        with open(story_path, "w") as f:
+            f.write(story_content)
+        with open(summary_path, "w") as f:
+            f.write(summary_text)
+        return story_path, summary_path
+    except Exception as e:
+        print(f"Error saving story/summary text files: {e}")
+        return None, None
+
 
 # Function to process and save images, JSON data, and audio files
 def process_images(images, json_data, story, summary, variables):
     audio_paths = generate_audio_files(story)  # Generate audio files
 
+    video_paths = []
+    story_path = None
+    summary_path = None
+
     with tempfile.TemporaryDirectory() as temp_dir:
-        video_paths = []  # To store the paths of generated video files
-
-        # Save images and JSON files to temporary directory
         for i, (image, json_content) in enumerate(zip(images, json_data)):
-            try:
-                img_path = os.path.join(temp_dir, f"image_{i}.png")
-                json_path = os.path.join(temp_dir, f"image_{i}.json")
-                
-                cv2.imwrite(img_path, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
-                with open(json_path, 'w') as f:
-                    json.dump(json_content, f)
+            video_file_path = _process_and_animate_single_image(
+                image_index=i,
+                image_array=image,
+                json_data_for_image=json_content,
+                temp_dir_path=temp_dir,
+                base_video_save_folder=save_video_folder, # Global save_video_folder
+                animation_variables=variables
+            )
+            if video_file_path:
+                video_paths.append(video_file_path)
 
-                # Video save path
-                current_time = str(datetime.datetime.now().date())
-                img_name = os.path.splitext(os.path.basename(img_path))[0]
-                video_save_name = f"{img_name}-{current_time}.mp4"
-                save_video_path = os.path.join(save_video_folder, video_save_name)
-                video_paths.append(save_video_path)  # Store video path for later use
-                print("save_video_path: ", save_video_path)
-
-                # Call drawing function (ensure draw_whiteboard_animations exists)
-                draw_whiteboard_animations(img_path, json_path, save_video_path, variables)
-            except Exception as e:
-                print(f"Error processing image {i}: {e}")
-
-        # Save story and summary
-        story_path = os.path.join(save_video_folder, "story.txt")
-        summary_path = os.path.join(save_video_folder, "summary.txt")
-        with open(story_path, "w") as f:
-            f.write(" ".join(story))  # Join list into string
-        with open(summary_path, "w") as f:
-            f.write(summary)
+        story_path, summary_path = _save_text_outputs(
+            story_segments_list=story,
+            summary_text=summary,
+            output_folder=save_video_folder # Global save_video_folder
+        )
 
     return story_path, summary_path, audio_paths, video_paths
 
